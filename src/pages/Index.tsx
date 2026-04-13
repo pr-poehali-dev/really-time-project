@@ -121,7 +121,7 @@ export default function Index() {
 
   const openWhatsApp = (name: string, price: number) => {
     const fp = promoApplied ? Math.round(price*(1-promoApplied/100)) : price;
-    window.open(`https://wa.me/79011505959?text=${encodeURIComponent(`Хочу купить: ${name} за ${fp}₽`)}`, "_blank");
+    window.open(`https://wa.me/79011506959?text=${encodeURIComponent(`Хочу купить: ${name} за ${fp}₽`)}`, "_blank");
   };
 
   const handleAdminLogin = () => {
@@ -502,7 +502,7 @@ export default function Index() {
                   <p className="text-sm font-semibold text-white mb-1">Напиши менеджеру в WhatsApp</p>
                   <p className="text-xs text-gray-500 mb-3">Укажи сумму — пришлём реквизиты для оплаты</p>
                   <button
-                    onClick={() => window.open(`https://wa.me/79011505959?text=${encodeURIComponent("Хочу пополнить баланс через карту")}`, "_blank")}
+                    onClick={() => window.open(`https://wa.me/79011506959?text=${encodeURIComponent("Хочу пополнить баланс через карту")}`, "_blank")}
                     className="w-full py-2.5 rounded-lg font-bold text-white flex items-center justify-center gap-2"
                     style={{ background:"linear-gradient(135deg,#25d366,#128c7e)" }}>
                     💬 WhatsApp +7 901 150-59-59
