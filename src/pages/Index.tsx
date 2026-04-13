@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Icon from "@/components/ui/icon";
 
 // ─── Data ───────────────────────────────────────────────────────────────────
@@ -29,7 +29,6 @@ const CASES_TITLES = [
 const PROMO_CODES: Record<string, number> = { KITTY: 10 };
 const ADMIN_PASS = "13nikita13";
 const SERVER_IP = "mc4ReallyTime.aternos.me";
-const DAILY_GIFT_COINS = 10000;
 
 const TIER_COLORS: Record<string, string> = {
   common: "from-zinc-800 to-zinc-900",
@@ -58,10 +57,16 @@ function lsGet<T>(key: string, fallback: T): T {
 function lsSet(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* noop */ }
 }
-function todayKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
+// One-time migration: remove legacy gift keys
+try {
+  localStorage.removeItem("rt_gift_day");
+  localStorage.removeItem("rt_nick");
+  // Reset balance once (v2 migration)
+  if (!localStorage.getItem("rt_v2")) {
+    localStorage.removeItem("rt_balance");
+    localStorage.setItem("rt_v2", "1");
+  }
+} catch { /* noop */ }
 
 // ─── Component ──────────────────────────────────────────────────────────────
 export default function Index() {
@@ -71,15 +76,12 @@ export default function Index() {
   const [balance, setBalanceRaw] = useState<number>(() => lsGet("rt_balance", 0));
   const [cart, setCartRaw] = useState<CartItem[]>(() => lsGet("rt_cart", []));
   const [promoApplied, setPromoAppliedRaw] = useState<number|null>(() => lsGet("rt_promo", null));
-  const [giftNick, setGiftNickRaw] = useState<string>(() => lsGet("rt_nick", ""));
-  const [giftClaimed, setGiftClaimedRaw] = useState<boolean>(() => lsGet("rt_gift_day", "") === todayKey());
 
   const setBalance = (v: number | ((p: number) => number)) =>
     setBalanceRaw(prev => { const n = typeof v==="function" ? v(prev) : v; lsSet("rt_balance", n); return n; });
   const setCart = (v: CartItem[] | ((p: CartItem[]) => CartItem[])) =>
     setCartRaw(prev => { const n = typeof v==="function" ? v(prev) : v; lsSet("rt_cart", n); return n; });
   const setPromoApplied = (v: number|null) => { setPromoAppliedRaw(v); lsSet("rt_promo", v); };
-  const setGiftNick = (v: string) => { setGiftNickRaw(v); lsSet("rt_nick", v); };
 
   // UI
   const [cartOpen, setCartOpen]         = useState(false);
@@ -95,18 +97,12 @@ export default function Index() {
   const [topupOpen, setTopupOpen]       = useState(false);
   const [topupAmount, setTopupAmount]   = useState("");
   const [topupCard, setTopupCard]       = useState(false);
-  const [giftOpen, setGiftOpen]         = useState(false);
-  const [giftMsg, setGiftMsg]           = useState("");
   const [copied, setCopied]             = useState(false);
+  const [adminTab, setAdminTab]         = useState<"give"|"remove">("give");
 
   const cartTotal       = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount       = cart.reduce((s, i) => s + i.qty, 0);
   const discountedTotal = promoApplied ? Math.round(cartTotal * (1 - promoApplied/100)) : cartTotal;
-
-  // Re-check gift claim on mount (for same-session day changes)
-  useEffect(() => {
-    setGiftClaimedRaw(lsGet("rt_gift_day", "") === todayKey());
-  }, []);
 
   const addToCart = (id: string, name: string, price: number) =>
     setCart(prev => {
@@ -138,22 +134,22 @@ export default function Index() {
     if (!adminUser.trim()) { setAdminMsg("Введите имя пользователя"); return; }
     if (isNaN(amt) || amt<=0) { setAdminMsg("Введите корректную сумму"); return; }
     setBalance(p => p + amt);
-    setAdminMsg(`Выдано ${amt}₽ пользователю ${adminUser}`);
+    setAdminMsg(`✓ Выдано ${amt.toLocaleString()}₽ → ${adminUser}`);
+    setAdminUser(""); setAdminAmount("");
+  };
+
+  const handleRemoveBalance = () => {
+    const amt = parseInt(adminAmount);
+    if (!adminUser.trim()) { setAdminMsg("Введите имя пользователя"); return; }
+    if (isNaN(amt) || amt<=0) { setAdminMsg("Введите корректную сумму"); return; }
+    setBalance(p => Math.max(0, p - amt));
+    setAdminMsg(`✓ Удалено ${amt.toLocaleString()}₽ у ${adminUser}`);
     setAdminUser(""); setAdminAmount("");
   };
 
   const handleTopup = () => {
     const amt = parseInt(topupAmount);
     if (!isNaN(amt) && amt>0) { setBalance(p => p+amt); setTopupOpen(false); setTopupAmount(""); setTopupCard(false); }
-  };
-
-  const claimDailyGift = () => {
-    if (!giftNick.trim()) { setGiftMsg("Введи свой ник на сервере"); return; }
-    if (giftClaimed) { setGiftMsg("Подарок уже получен сегодня!"); return; }
-    setBalance(p => p + DAILY_GIFT_COINS);
-    lsSet("rt_gift_day", todayKey());
-    setGiftClaimedRaw(true);
-    setGiftMsg(`+${DAILY_GIFT_COINS.toLocaleString()} монеток начислено на ${giftNick}!`);
   };
 
   const copyIP = () => {
@@ -384,23 +380,7 @@ export default function Index() {
         </div>
       </footer>
 
-      {/* ── DAILY GIFT (fixed bottom-left) ── */}
-      <div className="fixed bottom-5 left-5 z-40">
-        <button onClick={() => setGiftOpen(true)}
-          className="gift-bounce flex flex-col items-center gap-0.5 px-4 py-3 rounded-2xl"
-          style={{
-            background: giftClaimed ? "rgba(60,60,60,0.95)" : "linear-gradient(135deg,#c0392b,#d4a017)",
-            border:`2px solid ${giftClaimed?"rgba(255,255,255,0.08)":"rgba(255,215,0,0.45)"}`,
-            color:"white",
-            boxShadow: giftClaimed ? "none" : "0 0 18px rgba(212,160,23,0.35)",
-          }}>
-          <span style={{ fontSize:26 }}>🎁</span>
-          <span className="text-xs font-black" style={{ fontFamily:"Oswald,sans-serif", letterSpacing:"0.05em" }}>
-            {giftClaimed ? "ПОЛУЧЕНО" : "ПОДАРОК"}
-          </span>
-          {!giftClaimed && <span className="text-xs opacity-80 font-semibold">+10К монет</span>}
-        </button>
-      </div>
+
 
       {/* ── CART MODAL ── */}
       {cartOpen && (
@@ -535,50 +515,7 @@ export default function Index() {
         </div>
       )}
 
-      {/* ── DAILY GIFT MODAL ── */}
-      {giftOpen && (
-        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => { setGiftOpen(false); setGiftMsg(""); }}>
-          <div className="w-full max-w-sm rounded-2xl p-6 text-center animate-fade-in-up"
-            style={{ background:"#0f0f0f", border:"2px solid rgba(212,160,23,0.32)" }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize:52 }} className="mb-2">🎁</div>
-            <h2 className="text-2xl font-black text-white mb-1" style={{ fontFamily:"Oswald,sans-serif" }}>ЕЖЕДНЕВНЫЙ ПОДАРОК</h2>
-            <p className="text-gray-500 text-sm mb-4">Каждый день бесплатно!</p>
-            <div className="py-4 px-6 rounded-xl mb-4" style={{ background:"rgba(212,160,23,0.08)", border:"1px solid rgba(212,160,23,0.22)" }}>
-              <div className="text-4xl font-black" style={{ color:"#d4a017", fontFamily:"Oswald,sans-serif" }}>
-                +{DAILY_GIFT_COINS.toLocaleString()}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">монеток на сервер</p>
-            </div>
-            {!giftClaimed ? (
-              <>
-                <div className="mb-3 text-left">
-                  <label className="block text-xs text-gray-500 mb-1.5">Твой ник на сервере</label>
-                  <input type="text" value={giftNick} onChange={e => setGiftNick(e.target.value)}
-                    placeholder="Введи никнейм..." onKeyDown={e => e.key==="Enter" && claimDailyGift()}
-                    className="w-full px-4 py-3 rounded-lg" style={IS} />
-                </div>
-                {giftMsg && <p className="text-sm mb-3" style={{ color:"#ff7b7b" }}>{giftMsg}</p>}
-                <button onClick={claimDailyGift}
-                  className="w-full py-3 rounded-xl font-bold text-black"
-                  style={{ background:"linear-gradient(135deg,#ffd700,#d4a017)" }}>
-                  Получить подарок!
-                </button>
-              </>
-            ) : (
-              <>
-                {giftMsg && <p className="text-sm font-semibold mb-3" style={{ color:"#d4a017" }}>{giftMsg}</p>}
-                <div className="p-3 rounded-lg mb-3" style={{ background:"rgba(34,197,94,0.08)", border:"1px solid rgba(34,197,94,0.22)" }}>
-                  <p className="text-sm font-bold" style={{ color:"#22c55e" }}>✓ Подарок уже получен сегодня!</p>
-                  <p className="text-xs text-gray-500 mt-1">Возвращайся завтра за новым подарком</p>
-                </div>
-                <button onClick={() => { setGiftOpen(false); setGiftMsg(""); }} className="w-full py-2 rounded-lg text-sm text-gray-600">Закрыть</button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* ── ADMIN MODAL ── */}
       {adminOpen && (
@@ -606,10 +543,34 @@ export default function Index() {
               </>
             ) : (
               <>
-                <div className="p-3 rounded-lg mb-4" style={{ background:"rgba(212,160,23,0.07)", border:"1px solid rgba(212,160,23,0.15)" }}>
-                  <p className="text-xs text-gray-500 mb-0.5">Текущий баланс</p>
-                  <p className="text-2xl font-black" style={{ color:"#d4a017", fontFamily:"Oswald,sans-serif" }}>{balance.toLocaleString()}₽</p>
+                {/* Balance display */}
+                <div className="flex items-center justify-between p-3 rounded-lg mb-4"
+                  style={{ background:"rgba(212,160,23,0.07)", border:"1px solid rgba(212,160,23,0.15)" }}>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">Текущий баланс</p>
+                    <p className="text-2xl font-black" style={{ color:"#d4a017", fontFamily:"Oswald,sans-serif" }}>{balance.toLocaleString()}₽</p>
+                  </div>
+                  <button
+                    onClick={() => { setBalance(0); setAdminMsg("Баланс обнулён"); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background:"rgba(192,57,43,0.2)", border:"1px solid rgba(192,57,43,0.4)", color:"#ff7b7b" }}>
+                    Обнулить
+                  </button>
                 </div>
+
+                {/* Action tabs */}
+                <div className="flex gap-1 mb-4 p-1 rounded-lg" style={{ background:"rgba(255,255,255,0.04)" }}>
+                  <button onClick={() => { setAdminTab("give"); setAdminMsg(""); setAdminUser(""); setAdminAmount(""); }}
+                    className={`flex-1 py-2 rounded-md text-xs font-bold transition-all ${adminTab==="give" ? "tab-active" : "text-gray-500"}`}>
+                    + Выдать монеты
+                  </button>
+                  <button onClick={() => { setAdminTab("remove"); setAdminMsg(""); setAdminUser(""); setAdminAmount(""); }}
+                    className={`flex-1 py-2 rounded-md text-xs font-bold transition-all ${adminTab==="remove" ? "" : "text-gray-500"}`}
+                    style={adminTab==="remove" ? { background:"linear-gradient(135deg,#c0392b,#7b0000)", color:"white" } : {}}>
+                    − Удалить монеты
+                  </button>
+                </div>
+
                 <div className="space-y-3 mb-4">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Никнейм игрока</label>
@@ -622,13 +583,18 @@ export default function Index() {
                       placeholder="0" className="w-full px-3 py-2.5 rounded-lg text-sm" style={IS} />
                   </div>
                 </div>
+
                 {adminMsg && (
-                  <p className="text-sm mb-3" style={{ color:adminMsg.includes("Выдано")?"#d4a017":"#ff7b7b" }}>{adminMsg}</p>
+                  <p className="text-sm mb-3" style={{ color: adminMsg.startsWith("✓") ? "#d4a017" : "#ff7b7b" }}>{adminMsg}</p>
                 )}
-                <button onClick={handleGiveBalance}
+
+                <button
+                  onClick={adminTab==="give" ? handleGiveBalance : handleRemoveBalance}
                   className="w-full py-3 rounded-xl font-bold text-white"
-                  style={{ background:"linear-gradient(135deg,#c0392b,#d4a017)" }}>
-                  Выдать баланс
+                  style={{ background: adminTab==="give"
+                    ? "linear-gradient(135deg,#c0392b,#d4a017)"
+                    : "linear-gradient(135deg,#c0392b,#7b0000)" }}>
+                  {adminTab==="give" ? "+ Выдать монеты" : "− Удалить монеты"}
                 </button>
               </>
             )}
